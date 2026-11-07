@@ -13,21 +13,21 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import (
+from docmark.config import (
     ALLOWED_EXTENSIONS,
-    BASE_DIR,
     MAX_UPLOAD_BYTES,
     MAX_UPLOAD_MB,
     OUTPUT_DIR,
     UPLOAD_DIR,
 )
-from app.grading_adapter import ENGINE_NAME
-from app.jobs import JobStore
-from app.services.pipeline import process_job
+from docmark.grading_adapter import ENGINE_NAME
+from docmark.jobs import JobStore
+from docmark.services.pipeline import process_job
 
 logger = logging.getLogger(__name__)
-STATIC_DIR = BASE_DIR / "app" / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 STORE = JobStore()
+PAIR_SIZE_LIMIT = MAX_UPLOAD_BYTES * 2 + 2 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -39,7 +39,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="文批 DocMark",
-    description="上传 Word/PDF，下载带红色 # 计算的批注稿。",
+    description="上传一份 PDF 和一份 DOCX，下载带红色 # 批注的 Word。",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -72,6 +72,7 @@ async def config() -> dict:
     return {
         "max_upload_mb": MAX_UPLOAD_MB,
         "allowed_extensions": sorted(extension.lstrip(".") for extension in ALLOWED_EXTENSIONS),
+        "upload_requires": {"pdf": 1, "docx": 1},
         "engine": ENGINE_NAME,
     }
 
@@ -85,52 +86,50 @@ async def health() -> dict:
 async def create_job(
     request: Request,
     background_tasks: BackgroundTasks,
-    file: Annotated[UploadFile, File()],
+    pdf: Annotated[UploadFile | None, File()] = None,
+    docx: Annotated[UploadFile | None, File()] = None,
 ) -> JSONResponse:
-    original_name = _safe_display_name(file.filename or "")
-    suffix = Path(original_name).suffix.lower()
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=415, detail="仅支持 .docx（Word）和 .pdf 文件。")
+    if pdf is None or docx is None:
+        await _close_uploads(pdf, docx)
+        raise HTTPException(status_code=400, detail="请同时上传一份 PDF 和一份 DOCX。")
+
+    pdf_name = _safe_display_name(pdf.filename or "")
+    docx_name = _safe_display_name(docx.filename or "")
+    if Path(pdf_name).suffix.lower() != ".pdf":
+        await _close_uploads(pdf, docx)
+        raise HTTPException(status_code=415, detail="PDF 上传位置只接受 .pdf 文件。")
+    if Path(docx_name).suffix.lower() != ".docx":
+        await _close_uploads(pdf, docx)
+        raise HTTPException(status_code=415, detail="Word 上传位置只接受 .docx 文件。")
 
     content_length = request.headers.get("content-length")
-    if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES + 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"文件不能超过 {MAX_UPLOAD_MB} MB。")
+    if content_length and content_length.isdigit() and int(content_length) > PAIR_SIZE_LIMIT:
+        await _close_uploads(pdf, docx)
+        raise HTTPException(status_code=413, detail=f"单个文件不能超过 {MAX_UPLOAD_MB} MB。")
 
     job_id = uuid.uuid4().hex
-    source_path = UPLOAD_DIR / f"{job_id}{suffix}"
-    total = 0
+    pdf_path = UPLOAD_DIR / f"{job_id}.pdf"
+    docx_path = UPLOAD_DIR / f"{job_id}.docx"
 
     try:
-        with source_path.open("wb") as destination:
-            while chunk := await file.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail=f"文件不能超过 {MAX_UPLOAD_MB} MB。")
-                destination.write(chunk)
+        await _save_upload(pdf, pdf_path, "PDF")
+        await _save_upload(docx, docx_path, "Word")
     except HTTPException:
-        source_path.unlink(missing_ok=True)
+        _remove_files(pdf_path, docx_path)
+        await _close_uploads(pdf, docx)
         raise
-    except OSError as exc:
-        source_path.unlink(missing_ok=True)
-        logger.exception("Could not save upload")
-        raise HTTPException(status_code=500, detail="文件保存失败，请重试。") from exc
-    finally:
-        await file.close()
 
-    if total == 0:
-        source_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="文件是空的，请重新选择。")
-
-    validation_error = _validate_file(source_path, suffix)
+    validation_error = _validate_file(pdf_path, ".pdf") or _validate_file(docx_path, ".docx")
     if validation_error:
-        source_path.unlink(missing_ok=True)
+        _remove_files(pdf_path, docx_path)
         raise HTTPException(status_code=400, detail=validation_error)
 
     job = STORE.create(
         job_id=job_id,
-        original_name=original_name,
-        source_path=source_path,
-        source_type=suffix.lstrip("."),
+        pdf_name=pdf_name,
+        pdf_path=pdf_path,
+        docx_name=docx_name,
+        docx_path=docx_path,
     )
     background_tasks.add_task(process_job, job_id, STORE)
     return JSONResponse(job.public(), status_code=202)
@@ -166,6 +165,44 @@ async def download(job_id: str) -> FileResponse:
     )
 
 
+async def _save_upload(file: UploadFile, destination: Path, label: str) -> None:
+    total = 0
+    try:
+        with destination.open("wb") as handle:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"{label} 文件不能超过 {MAX_UPLOAD_MB} MB。",
+                    )
+                handle.write(chunk)
+    except HTTPException:
+        destination.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        destination.unlink(missing_ok=True)
+        logger.exception("Could not save %s upload", label)
+        raise HTTPException(status_code=500, detail=f"{label} 文件保存失败，请重试。") from exc
+    finally:
+        await file.close()
+
+    if total == 0:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"{label} 文件是空的，请重新选择。")
+
+
+async def _close_uploads(*files: UploadFile | None) -> None:
+    for file in files:
+        if file is not None:
+            await file.close()
+
+
+def _remove_files(*paths: Path) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
 def _safe_display_name(raw: str) -> str:
     name = raw.replace("\\", "/").rsplit("/", 1)[-1]
     name = "".join(character for character in name if character.isprintable()).strip()
@@ -183,11 +220,11 @@ def _validate_file(path: Path, suffix: str) -> str | None:
 
     if suffix == ".pdf":
         if not header.startswith(b"%PDF-"):
-            return "文件内容不是有效的 PDF。"
+            return "PDF 文件内容无效。"
         return None
 
     if not header.startswith(b"PK"):
-        return "文件内容不是有效的 .docx 文件。"
+        return "Word 文件内容不是有效的 .docx 文件。"
     try:
         if not zipfile.is_zipfile(path):
             return "Word 文件已损坏，请重新导出后再上传。"

@@ -17,7 +17,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $uvicornArgs = @(
-    "run", "uvicorn", "app.main:app",
+    "run", "uvicorn", "docmark.main:app",
     "--host", $BindHost,
     "--port", "$Port"
 )

@@ -7,12 +7,11 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from app.services.extractor import ExtractedDocument
-from app.services.mathcheck import MathIssue, find_math_issues
+from docmark.services.mathcheck import MathIssue, find_math_issues
 
 ANNOTATION_COLOR = RGBColor(0xC0, 0x39, 0x2B)
 ANNOTATION_FONT = "Microsoft YaHei"
@@ -46,66 +45,6 @@ def annotate_docx(source: Path, output: Path) -> int:
         raise
     except Exception as exc:
         raise AnnotationError("写入批注稿时出错，请检查文件是否被 Word 占用。") from exc
-
-    return issue_count
-
-
-def create_annotated_docx_from_pdf(extracted: ExtractedDocument, output: Path) -> int:
-    """Build an editable review copy for a PDF upload.
-
-    PDFs cannot be edited in place like DOCX files. The extracted text is
-    reflowed into a clean Word document, then annotated in the same way.
-    """
-    document = Document()
-    section = document.sections[0]
-    section.page_width = Cm(21)
-    section.page_height = Cm(29.7)
-    section.top_margin = Cm(2.2)
-    section.bottom_margin = Cm(2.2)
-    section.left_margin = Cm(2.4)
-    section.right_margin = Cm(2.4)
-
-    normal = document.styles["Normal"]
-    normal.font.name = ANNOTATION_FONT
-    normal.font.size = Pt(10.5)
-    _set_east_asia_font(normal.element, ANNOTATION_FONT)
-
-    blocks = extracted.as_json.get("blocks", [])
-    pages = extracted.as_json.get("pages", [])
-    issue_count = 0
-    last_page = None
-
-    try:
-        for page in pages:
-            page_number = page.get("page")
-            page_blocks = [block for block in blocks if block.get("page") == page_number]
-            if not page_blocks:
-                continue
-            if last_page is not None:
-                document.add_page_break()
-            last_page = page_number
-
-            for block in page_blocks:
-                text = str(block.get("text", "")).strip()
-                if not text:
-                    continue
-                paragraph = document.add_paragraph(text)
-                paragraph.paragraph_format.space_after = Pt(6)
-                paragraph.paragraph_format.line_spacing = 1.5
-                issues = find_math_issues(text)
-                if issues:
-                    _insert_annotations(paragraph, issues)
-                    issue_count += len(issues)
-
-        if last_page is None:
-            raise AnnotationError("PDF 中没有可写入批注稿的文字。")
-
-        output.parent.mkdir(parents=True, exist_ok=True)
-        document.save(str(output))
-    except AnnotationError:
-        raise
-    except Exception as exc:
-        raise AnnotationError("生成 PDF 批注稿时出错。") from exc
 
     return issue_count
 

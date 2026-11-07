@@ -4,9 +4,9 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import docx_bytes, pdf_bytes
 
-from app.main import app
+from docmark.main import app
+from helpers import docx_bytes, pdf_bytes
 
 
 @pytest.fixture(scope="module")
@@ -15,10 +15,24 @@ def client():
         yield test_client
 
 
-def upload_and_wait(client: TestClient, filename: str, content: bytes, content_type: str):
+def upload_and_wait(
+    client: TestClient,
+    *,
+    pdf_name: str = "题目.pdf",
+    pdf_content: bytes | None = None,
+    docx_name: str = "作业.docx",
+    docx_content: bytes | None = None,
+):
     response = client.post(
         "/api/jobs",
-        files={"file": (filename, content, content_type)},
+        files={
+            "pdf": (pdf_name, pdf_content or pdf_bytes("7 + 8 = 16"), "application/pdf"),
+            "docx": (
+                docx_name,
+                docx_content or docx_bytes(["作业：7 + 8 = 16。", "3 + 3 = 6。"]),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+        },
     )
     assert response.status_code == 202, response.text
     job = response.json()
@@ -41,19 +55,20 @@ def test_homepage_and_config(client: TestClient) -> None:
     config = client.get("/api/config").json()
     assert config["max_upload_mb"] >= 1
     assert config["allowed_extensions"] == ["docx", "pdf"]
+    assert config["upload_requires"] == {"pdf": 1, "docx": 1}
 
 
-def test_upload_annotate_and_download_docx(client: TestClient) -> None:
-    source = docx_bytes(["作业：7 + 8 = 16。", "3 + 3 = 6。"])
-
+def test_upload_pair_annotate_and_download_docx(client: TestClient) -> None:
     job = upload_and_wait(
         client,
-        "数学作业.docx",
-        source,
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        pdf_name="题目.pdf",
+        docx_name="数学作业.docx",
+        docx_content=docx_bytes(["作业：7 + 8 = 16。", "3 + 3 = 6。"]),
     )
     assert job["status"] == "completed", job
     assert job["issue_count"] == 1
+    assert job["pdf_name"] == "题目.pdf"
+    assert job["docx_name"] == "数学作业.docx"
     assert job["output_name"] == "数学作业_批注.docx"
     assert job["download_url"].endswith("/download")
 
@@ -63,29 +78,46 @@ def test_upload_annotate_and_download_docx(client: TestClient) -> None:
     assert "filename*=utf-8''" in response.headers["content-disposition"].lower()
 
 
-def test_upload_pdf_produces_docx(client: TestClient) -> None:
-    job = upload_and_wait(client, "练习.pdf", pdf_bytes("4 + 5 = 10"), "application/pdf")
-    assert job["status"] == "completed", job
-    assert job["issue_count"] == 1
-    assert job["output_name"] == "练习_批注.docx"
-    assert client.get(job["download_url"]).status_code == 200
+def test_rejects_missing_half_of_the_pair(client: TestClient) -> None:
+    response = client.post(
+        "/api/jobs",
+        files={"pdf": ("题目.pdf", pdf_bytes(), "application/pdf")},
+    )
+    assert response.status_code == 400
+    assert "同时上传" in response.json()["detail"]
 
 
-def test_rejects_unsupported_and_fake_files(client: TestClient) -> None:
-    unsupported = client.post("/api/jobs", files={"file": ("notes.txt", b"hello", "text/plain")})
-    assert unsupported.status_code == 415
-
-    fake_docx = client.post(
+def test_rejects_invalid_pdf_content(client: TestClient) -> None:
+    response = client.post(
         "/api/jobs",
         files={
-            "file": (
-                "fake.docx",
-                b"not a zip",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
+            "pdf": ("bad.pdf", b"not a pdf", "application/pdf"),
+            "docx": ("作业.docx", docx_bytes(["1 + 1 = 2"]), "application/octet-stream"),
         },
     )
-    assert fake_docx.status_code == 400
+    assert response.status_code == 400
+
+
+def test_rejects_wrong_extension_in_slot(client: TestClient) -> None:
+    response = client.post(
+        "/api/jobs",
+        files={
+            "pdf": ("其实是文档.docx", docx_bytes(["x"]), "application/octet-stream"),
+            "docx": ("作业.docx", docx_bytes(["1 + 1 = 2"]), "application/octet-stream"),
+        },
+    )
+    assert response.status_code == 415
+
+
+def test_rejects_fake_docx(client: TestClient) -> None:
+    response = client.post(
+        "/api/jobs",
+        files={
+            "pdf": ("题目.pdf", pdf_bytes(), "application/pdf"),
+            "docx": ("fake.docx", b"not a zip", "application/octet-stream"),
+        },
+    )
+    assert response.status_code == 400
 
 
 def test_unknown_job(client: TestClient) -> None:

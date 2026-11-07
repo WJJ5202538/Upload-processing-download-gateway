@@ -2,7 +2,7 @@
   "use strict";
 
   const state = {
-    file: null,
+    files: { pdf: null, docx: null },
     maxMb: 30,
     engine: "",
     jobId: null,
@@ -11,10 +11,31 @@
     statusTimer: null,
     startedAt: 0,
     pollFailures: 0,
-    uploadPercent: 0,
   };
 
   const $ = (selector) => document.querySelector(selector);
+
+  const slots = {
+    pdf: {
+      drop: $("#pdf-drop"),
+      input: $("#pdf-input"),
+      card: $("#pdf-file"),
+      name: $("#pdf-name"),
+      size: $("#pdf-size"),
+      remove: $("#pdf-remove"),
+      label: "PDF",
+    },
+    docx: {
+      drop: $("#docx-drop"),
+      input: $("#docx-input"),
+      card: $("#docx-file"),
+      name: $("#docx-name"),
+      size: $("#docx-size"),
+      remove: $("#docx-remove"),
+      label: "Word",
+    },
+  };
+
   const elements = {
     panel: $(".panel"),
     panelTitle: $("#panel-title"),
@@ -26,15 +47,11 @@
       error: $("#view-error"),
     },
     form: $("#upload-form"),
-    dropzone: $("#dropzone"),
-    input: $("#file-input"),
-    fileCard: $("#file-card"),
-    fileType: $("#file-type"),
-    fileName: $("#file-name"),
-    fileSize: $("#file-size"),
-    removeFile: $("#remove-file"),
     formError: $("#form-error"),
     submit: $("#submit-btn"),
+    pairStatus: $("#pair-status"),
+    pairStatusText: $("#pair-status-text"),
+    pairStatusCount: $("#pair-status-count"),
     processingFile: $("#processing-file"),
     progressBar: $("#progress-bar"),
     progressLabel: $("#progress-label"),
@@ -50,7 +67,7 @@
   };
 
   const stagePlan = [
-    { at: 0, value: 42, label: "正在解析文档结构…", step: 1 },
+    { at: 0, value: 42, label: "正在解析 PDF 与 Word…", step: 1 },
     { at: 1800, value: 55, label: "正在提取文字与表格…", step: 2 },
     { at: 3800, value: 68, label: "正在核对数学计算…", step: 3 },
     { at: 6200, value: 83, label: "正在写入红色批注…", step: 4 },
@@ -97,6 +114,10 @@
     return match ? match[1].toLowerCase() : "";
   }
 
+  function hasBothFiles() {
+    return Boolean(state.files.pdf && state.files.docx);
+  }
+
   function describeError(data, fallback) {
     if (data && typeof data.detail === "string" && data.detail.trim()) {
       return data.detail;
@@ -114,49 +135,87 @@
     elements.formError.hidden = true;
   }
 
-  function validateFile(file) {
+  function validateFile(kind, file) {
     const extension = fileExtension(file);
-    if (!["docx", "pdf"].includes(extension)) {
-      return "仅支持 .docx（Word）和 .pdf 文件。";
+    if (extension !== kind) {
+      return kind === "pdf"
+        ? "PDF 上传位置只接受 .pdf 文件。"
+        : "Word 上传位置只接受 .docx 文件。";
     }
     if (file.size === 0) {
       return "这个文件是空的，请重新选择。";
     }
     if (file.size > state.maxMb * 1024 * 1024) {
-      return "文件不能超过 " + state.maxMb + " MB。";
+      return "每个文件不能超过 " + state.maxMb + " MB。";
     }
     return "";
   }
 
-  function chooseFile(file) {
-    if (!file) return;
-    clearFormError();
-    const error = validateFile(file);
-    if (error) {
-      showFormError(error);
-      resetFile();
-      return;
-    }
+  function renderFiles() {
+    Object.entries(slots).forEach(([kind, slot]) => {
+      const file = state.files[kind];
+      slot.drop.hidden = Boolean(file);
+      slot.card.hidden = !file;
+      if (file) {
+        slot.name.textContent = file.name;
+        slot.size.textContent = formatBytes(file.size) + " · " + slot.label + " 文件";
+      }
+    });
 
-    state.file = file;
-    const extension = fileExtension(file);
-    elements.fileType.textContent = extension === "pdf" ? "PDF" : "DOCX";
-    elements.fileType.classList.toggle("is-pdf", extension === "pdf");
-    elements.fileName.textContent = file.name;
-    elements.fileSize.textContent = formatBytes(file.size) + " · " + (extension === "pdf" ? "PDF 文档" : "Word 文档");
-    elements.fileCard.hidden = false;
-    elements.dropzone.hidden = true;
-    elements.submit.disabled = false;
-    elements.submit.focus({ preventScroll: true });
+    const count = Number(Boolean(state.files.pdf)) + Number(Boolean(state.files.docx));
+    elements.pairStatusCount.textContent = count + " / 2";
+    elements.pairStatus.classList.toggle("is-ready", count === 2);
+    elements.submit.disabled = count !== 2;
+
+    if (count === 2) {
+      elements.pairStatusText.textContent = "两份文件已齐备，可以开始批改";
+    } else if (count === 1 && state.files.pdf) {
+      elements.pairStatusText.textContent = "还需要一份 Word 文件（批注底稿）";
+    } else if (count === 1 && state.files.docx) {
+      elements.pairStatusText.textContent = "还需要一份 PDF 文件";
+    } else {
+      elements.pairStatusText.textContent = "还需要一份 PDF 和一份 Word";
+    }
   }
 
-  function resetFile() {
-    state.file = null;
-    elements.input.value = "";
-    elements.fileCard.hidden = true;
-    elements.dropzone.hidden = false;
-    elements.submit.disabled = true;
+  function chooseFile(kind, file) {
+    if (!file) return;
     clearFormError();
+    const error = validateFile(kind, file);
+    if (error) {
+      showFormError(error);
+      slots[kind].input.value = "";
+      return;
+    }
+    state.files[kind] = file;
+    renderFiles();
+  }
+
+  function resetFile(kind) {
+    state.files[kind] = null;
+    slots[kind].input.value = "";
+    renderFiles();
+    clearFormError();
+    slots[kind].drop.focus({ preventScroll: true });
+  }
+
+  function resetAllFiles() {
+    Object.keys(slots).forEach((kind) => {
+      state.files[kind] = null;
+      slots[kind].input.value = "";
+    });
+    renderFiles();
+    clearFormError();
+  }
+
+  function focusNextMissing() {
+    if (!state.files.pdf) {
+      slots.pdf.drop.focus({ preventScroll: true });
+    } else if (!state.files.docx) {
+      slots.docx.drop.focus({ preventScroll: true });
+    } else {
+      elements.submit.focus({ preventScroll: true });
+    }
   }
 
   function stopProcessing() {
@@ -188,23 +247,25 @@
   }
 
   function beginUpload() {
-    if (!state.file) return;
+    if (!hasBothFiles()) return;
+    const pdf = state.files.pdf;
+    const docx = state.files.docx;
     clearFormError();
     state.jobId = null;
     state.startedAt = Date.now();
     state.pollFailures = 0;
-    state.uploadPercent = 0;
 
-    elements.processingFile.textContent = state.file.name;
+    elements.processingFile.textContent = pdf.name + "  +  " + docx.name;
     elements.progressBar.value = 0;
     elements.progressPercent.textContent = "0%";
-    elements.progressLabel.textContent = "正在上传文件…";
+    elements.progressLabel.textContent = "正在上传两份文件…";
     setStep(1, false);
     showView("progress");
     elements.panel.scrollIntoView({ behavior: "smooth", block: "start" });
 
     const formData = new FormData();
-    formData.append("file", state.file, state.file.name);
+    formData.append("pdf", pdf, pdf.name);
+    formData.append("docx", docx, docx.name);
 
     const xhr = new XMLHttpRequest();
     state.xhr = xhr;
@@ -215,7 +276,6 @@
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
       const percent = Math.max(1, Math.min(36, Math.round((event.loaded / event.total) * 36)));
-      state.uploadPercent = percent;
       setProgress(percent, "正在上传 · " + formatBytes(event.loaded) + " / " + formatBytes(event.total));
     };
 
@@ -298,7 +358,7 @@
         return;
       }
       if (data.status === "failed") {
-        showError(data.error || "批改没有成功，请换一个文件试试。");
+        showError(data.error || "批改没有成功，请换一组文件试试。");
         return;
       }
 
@@ -364,10 +424,10 @@
       state.xhr = null;
     }
     state.jobId = null;
-    resetFile();
+    resetAllFiles();
     elements.progressBar.value = 0;
     elements.progressPercent.textContent = "0%";
-    elements.progressLabel.textContent = "正在上传文件…";
+    elements.progressLabel.textContent = "正在上传两份文件…";
     elements.processingFile.textContent = "";
     elements.resultSummary.textContent = "";
     elements.resultName.textContent = "";
@@ -377,7 +437,7 @@
     setStep(1, false);
     showView("upload");
     elements.panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    window.setTimeout(() => elements.dropzone.focus({ preventScroll: true }), 250);
+    window.setTimeout(() => slots.pdf.drop.focus({ preventScroll: true }), 250);
   }
 
   async function loadConfig() {
@@ -400,53 +460,53 @@
     }
   }
 
+  Object.entries(slots).forEach(([kind, slot]) => {
+    slot.input.addEventListener("change", () => {
+      const file = slot.input.files && slot.input.files[0];
+      chooseFile(kind, file);
+    });
+
+    slot.remove.addEventListener("click", () => resetFile(kind));
+
+    slot.drop.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        slot.input.click();
+      }
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      slot.drop.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        slot.drop.classList.add("is-dragging");
+      });
+    });
+
+    ["dragleave", "dragend"].forEach((eventName) => {
+      slot.drop.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        slot.drop.classList.remove("is-dragging");
+      });
+    });
+
+    slot.drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      slot.drop.classList.remove("is-dragging");
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      chooseFile(kind, file);
+    });
+  });
+
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!state.file) {
-      showFormError("请先选择一个 Word 或 PDF 文件。");
+    if (!hasBothFiles()) {
+      showFormError("请同时选择一份 PDF 和一份 Word 文件。");
+      focusNextMissing();
       return;
     }
     beginUpload();
-  });
-
-  elements.input.addEventListener("change", () => {
-    const file = elements.input.files && elements.input.files[0];
-    chooseFile(file);
-  });
-
-  elements.removeFile.addEventListener("click", () => {
-    resetFile();
-    elements.dropzone.focus({ preventScroll: true });
-  });
-
-  elements.dropzone.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      elements.input.click();
-    }
-  });
-
-  ["dragenter", "dragover"].forEach((eventName) => {
-    elements.dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      elements.dropzone.classList.add("is-dragging");
-    });
-  });
-
-  ["dragleave", "dragend"].forEach((eventName) => {
-    elements.dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      elements.dropzone.classList.remove("is-dragging");
-    });
-  });
-
-  elements.dropzone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    elements.dropzone.classList.remove("is-dragging");
-    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
-    chooseFile(file);
   });
 
   window.addEventListener("dragover", (event) => event.preventDefault());
@@ -456,11 +516,13 @@
   elements.errorRetry.addEventListener("click", () => {
     showView("upload");
     elements.panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    if (state.file) {
-      elements.submit.focus({ preventScroll: true });
-    } else {
-      window.setTimeout(() => elements.dropzone.focus({ preventScroll: true }), 250);
-    }
+    window.setTimeout(() => {
+      if (hasBothFiles()) {
+        elements.submit.focus({ preventScroll: true });
+      } else {
+        focusNextMissing();
+      }
+    }, 250);
   });
 
   window.addEventListener("pagehide", () => {
@@ -468,5 +530,6 @@
     if (state.pollTimer) window.clearTimeout(state.pollTimer);
   });
 
+  renderFiles();
   loadConfig();
 })();

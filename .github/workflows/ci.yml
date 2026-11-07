@@ -49,7 +49,10 @@ jobs:
           uv run python --version
 
       - name: Lint
-        run: uv run ruff check app tests
+        run: uv run ruff check src tests
 
       - name: Test
         run: uv run pytest
+
+      - name: Build package
+        run: uv build

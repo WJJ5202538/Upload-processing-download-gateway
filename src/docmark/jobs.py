@@ -10,9 +10,10 @@ from pathlib import Path
 @dataclass
 class Job:
     id: str
-    original_name: str
-    source_path: Path
-    source_type: str
+    pdf_name: str
+    pdf_path: Path
+    docx_name: str
+    docx_path: Path
     status: str = "queued"
     created_at: str = field(default_factory=lambda: _now())
     updated_at: str = field(default_factory=lambda: _now())
@@ -26,8 +27,8 @@ class Job:
         download_url = f"/api/jobs/{self.id}/download" if self.status == "completed" else None
         return {
             "id": self.id,
-            "original_name": self.original_name,
-            "source_type": self.source_type,
+            "pdf_name": self.pdf_name,
+            "docx_name": self.docx_name,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -46,13 +47,22 @@ class JobStore:
         self._lock = threading.RLock()
         self._jobs: dict[str, Job] = {}
 
-    def create(self, *, job_id: str, original_name: str, source_path: Path, source_type: str) -> Job:
+    def create(
+        self,
+        *,
+        job_id: str,
+        pdf_name: str,
+        pdf_path: Path,
+        docx_name: str,
+        docx_path: Path,
+    ) -> Job:
         with self._lock:
             job = Job(
                 id=job_id,
-                original_name=original_name,
-                source_path=source_path,
-                source_type=source_type,
+                pdf_name=pdf_name,
+                pdf_path=pdf_path,
+                docx_name=docx_name,
+                docx_path=docx_path,
             )
             self._jobs[job_id] = job
             return copy.copy(job)

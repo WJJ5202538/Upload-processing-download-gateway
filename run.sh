@@ -11,7 +11,7 @@ fi
 uv sync --locked
 
 if [ "${RELOAD:-0}" = "1" ]; then
-    exec uv run uvicorn app.main:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}" --reload
+    exec uv run uvicorn docmark.main:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}" --reload
 fi
 
-exec uv run uvicorn app.main:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}"
+exec uv run uvicorn docmark.main:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}"

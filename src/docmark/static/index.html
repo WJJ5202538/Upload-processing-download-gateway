@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="上传 Word 或 PDF，下载带红色 # 批注的 Word 文档。">
+  <meta name="description" content="上传一份 PDF 和一份 DOCX，下载带红色 # 批注的 Word 文档。">
   <title>文批 DocMark · 上传、批注、下载</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
@@ -34,11 +34,11 @@
       </div>
       <h1 id="hero-title">把计算错误，<br><em>留在明处。</em></h1>
       <p class="hero-copy">
-        上传 Word 或 PDF，系统会在错误处另起一行，用红色 <strong>#</strong> 标出计算问题。
+        同时上传一份 PDF 和一份 Word，系统会在 Word 的错误处另起一行，用红色 <strong>#</strong> 标出计算问题。
         原文不动，批注清晰。
       </p>
       <div class="hero-meta" aria-label="产品特点">
-        <span><b>01</b> 上传原稿</span>
+        <span><b>01</b> 成对上传</span>
         <span><b>02</b> 自动批注</span>
         <span><b>03</b> 下载 Word</span>
       </div>
@@ -60,34 +60,61 @@
 
         <div class="view" id="view-upload">
           <form id="upload-form" novalidate>
-            <label class="dropzone" id="dropzone" for="file-input" tabindex="0">
-              <input class="visually-hidden" id="file-input" name="file" type="file" accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-              <span class="dropzone-icon" aria-hidden="true">
-                <svg viewBox="0 0 48 48" fill="none">
-                  <path d="M14 33.5h20a7 7 0 1 0-2.1-13.7A10.5 10.5 0 0 0 11.6 22 6 6 0 0 0 14 33.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                  <path d="M24 31V21m0 0-4 4m4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-              <span class="dropzone-title">把文件拖到这里</span>
-              <span class="dropzone-sub">或 <u>浏览本地文件</u></span>
-              <span class="formats">
-                <span>DOCX</span><i aria-hidden="true"></i>
-                <span>PDF</span><i aria-hidden="true"></i>
-                不超过 <b data-max-mb>30</b> MB
-              </span>
-            </label>
+            <div class="pair-intro">
+              <p><strong>成对上传</strong><span>一份 PDF + 一份 DOCX，缺一不可</span></p>
+              <span class="pair-limit">每个不超过 <b data-max-mb>30</b> MB</span>
+            </div>
 
-            <div class="file-card" id="file-card" hidden>
-              <span class="file-type" id="file-type">DOCX</span>
-              <span class="file-details">
-                <strong id="file-name"></strong>
-                <small id="file-size"></small>
-              </span>
-              <button class="remove-file" id="remove-file" type="button" aria-label="移除已选文件">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                </svg>
-              </button>
+            <div class="pair-grid" id="pair-grid">
+              <div class="pair-slot" data-kind="pdf" id="pdf-slot">
+                <div class="pair-slot-head">
+                  <span>01</span>
+                  <strong>PDF</strong>
+                </div>
+                <label class="pair-drop" id="pdf-drop" for="pdf-input" tabindex="0">
+                  <input class="visually-hidden" id="pdf-input" name="pdf" type="file" accept=".pdf,application/pdf">
+                  <span class="pair-icon" aria-hidden="true">PDF</span>
+                  <span class="pair-drop-title">选择 PDF 文件</span>
+                  <span class="pair-drop-sub">点击或拖入 .pdf</span>
+                </label>
+                <div class="pair-file" id="pdf-file" hidden>
+                  <span class="pair-file-badge">PDF</span>
+                  <span class="pair-file-copy">
+                    <strong id="pdf-name"></strong>
+                    <small id="pdf-size"></small>
+                  </span>
+                  <button class="pair-remove" id="pdf-remove" type="button" aria-label="移除 PDF 文件">×</button>
+                </div>
+              </div>
+
+              <div class="pair-plus" aria-hidden="true">+</div>
+
+              <div class="pair-slot" data-kind="docx" id="docx-slot">
+                <div class="pair-slot-head">
+                  <span>02</span>
+                  <strong>DOCX</strong>
+                </div>
+                <label class="pair-drop" id="docx-drop" for="docx-input" tabindex="0">
+                  <input class="visually-hidden" id="docx-input" name="docx" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                  <span class="pair-icon pair-icon-word" aria-hidden="true">DOCX</span>
+                  <span class="pair-drop-title">选择 Word 文件</span>
+                  <span class="pair-drop-sub">批注底稿 · .docx</span>
+                </label>
+                <div class="pair-file" id="docx-file" hidden>
+                  <span class="pair-file-badge pair-file-badge-word">DOCX</span>
+                  <span class="pair-file-copy">
+                    <strong id="docx-name"></strong>
+                    <small id="docx-size"></small>
+                  </span>
+                  <button class="pair-remove" id="docx-remove" type="button" aria-label="移除 Word 文件">×</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="pair-status" id="pair-status" role="status" aria-live="polite">
+              <span class="pair-status-dot" aria-hidden="true"></span>
+              <span id="pair-status-text">还需要一份 PDF 和一份 Word</span>
+              <span class="pair-status-count" id="pair-status-count">0 / 2</span>
             </div>
 
             <p class="form-error" id="form-error" role="alert" hidden></p>
@@ -104,7 +131,7 @@
               <path d="M8.5 10V7.8a3.5 3.5 0 0 1 7 0V10" stroke="currentColor" stroke-width="1.6"/>
               <path d="M12 14v2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
-            <p><strong>原稿不会被改写。</strong>批注以独立红字写入副本，文件仅保存在本机，下载后由你保管。</p>
+            <p><strong>原稿不会被改写。</strong>PDF 参与解析与核对，批注红字写入 DOCX 副本，文件仅保存在本机。</p>
           </div>
         </div>
 
@@ -199,15 +226,15 @@
           <ol class="mini-flow">
             <li>
               <span class="flow-number">1</span>
-              <span><strong>上传原稿</strong><small>Word 或 PDF，最大 <b data-max-mb>30</b> MB</small></span>
+              <span><strong>上传 PDF + Word</strong><small>两份文件，每个最大 <b data-max-mb>30</b> MB</small></span>
             </li>
             <li>
               <span class="flow-number">2</span>
-              <span><strong>解析与核对</strong><small>提取段落、表格中的计算表达式</small></span>
+              <span><strong>解析与核对</strong><small>读取 PDF 与 Word 的段落、表格和计算</small></span>
             </li>
             <li>
               <span class="flow-number">3</span>
-              <span><strong>生成批注稿</strong><small>错误处新增红字，原文保持原样</small></span>
+              <span><strong>写入 Word 批注</strong><small>错误处新增红字，原文保持原样</small></span>
             </li>
             <li>
               <span class="flow-number">4</span>
@@ -218,7 +245,7 @@
 
         <div class="side-footnote">
           <span aria-hidden="true">※</span>
-          PDF 无法原位编辑，将先转为可编辑 Word 批注稿。
+          PDF 与 DOCX 缺一不可；批注写入 DOCX 副本。
         </div>
       </aside>
     </div>

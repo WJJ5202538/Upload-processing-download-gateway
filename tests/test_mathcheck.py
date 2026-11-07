@@ -1,4 +1,4 @@
-from app.services.mathcheck import find_math_issues
+from docmark.services.mathcheck import find_math_issues
 
 
 def messages(text: str) -> list[str]:

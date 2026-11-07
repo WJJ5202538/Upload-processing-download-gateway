@@ -5,11 +5,11 @@ import logging
 import re
 from pathlib import Path
 
-from app.config import OUTPUT_DIR
-from app.grading_adapter import grade
-from app.jobs import JobStore
-from app.services.annotator import AnnotationError
-from app.services.extractor import ExtractionError
+from docmark.config import OUTPUT_DIR
+from docmark.grading_adapter import GradingError, grade
+from docmark.jobs import JobStore
+from docmark.services.annotator import AnnotationError
+from docmark.services.extractor import ExtractedDocument, ExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +27,19 @@ def process_job(job_id: str, store: JobStore) -> None:
     output_path = OUTPUT_DIR / f"{job_id}.docx"
 
     try:
-        result = grade(job.source_path, output_path, job.source_type)
+        result = grade(job.pdf_path, job.docx_path, output_path)
         if not output_path.is_file() or output_path.stat().st_size == 0:
             raise ProcessingError("批注稿没有成功生成，请重试。")
 
-        _save_extraction_sidecars(job_id, result)
+        _save_extraction_sidecars(job_id, result.extractions)
         store.complete(
             job_id,
-            output_name=_output_filename(job.original_name),
+            output_name=_output_filename(job.docx_name),
             output_path=output_path,
             issue_count=result.issue_count,
             engine=result.engine,
         )
-    except (ExtractionError, AnnotationError, ProcessingError) as exc:
+    except (ExtractionError, AnnotationError, GradingError, ProcessingError) as exc:
         _remove_failed_output(output_path)
         store.fail(job_id, str(exc))
     except Exception:
@@ -58,18 +58,18 @@ def _output_filename(original_name: str) -> str:
     return f"{stem}_批注.docx"
 
 
-def _save_extraction_sidecars(job_id: str, result) -> None:
+def _save_extraction_sidecars(job_id: str, extractions: list[ExtractedDocument]) -> None:
     """Keep JSON/Markdown outputs for debugging and module hand-off."""
-    if result.extraction is None:
-        return
     try:
-        json_path = OUTPUT_DIR / f"{job_id}.extraction.json"
-        md_path = OUTPUT_DIR / f"{job_id}.extraction.md"
-        json_path.write_text(
-            json.dumps(result.extraction.as_json, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        md_path.write_text(result.extraction.markdown, encoding="utf-8")
+        for extraction in extractions:
+            prefix = f"{job_id}.{extraction.source_type}"
+            json_path = OUTPUT_DIR / f"{prefix}.extraction.json"
+            md_path = OUTPUT_DIR / f"{prefix}.extraction.md"
+            json_path.write_text(
+                json.dumps(extraction.as_json, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            md_path.write_text(extraction.markdown, encoding="utf-8")
     except OSError:
         logger.warning("Could not write extraction sidecars for %s", job_id, exc_info=True)
 

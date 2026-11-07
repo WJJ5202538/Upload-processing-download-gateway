@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.getenv("DOCMARK_DATA_DIR", str(BASE_DIR / "data"))).resolve()
+DEFAULT_DATA_DIR = Path.cwd() / "data"
+DATA_DIR = Path(os.getenv("DOCMARK_DATA_DIR", str(DEFAULT_DATA_DIR))).resolve()
 UPLOAD_DIR = DATA_DIR / "uploads"
 OUTPUT_DIR = DATA_DIR / "outputs"
 
